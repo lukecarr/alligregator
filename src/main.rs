@@ -20,6 +20,9 @@ struct Args {
 
     #[clap(short, long, default_value = "output.csv")]
     output: String,
+
+    #[clap(short, long)]
+    verbose: bool,
 }
 
 fn main() -> io::Result<()> {
@@ -32,10 +35,12 @@ fn main() -> io::Result<()> {
         let path = Path::new(&args.root).join(folder).join(&args.filename);
 
         if !path.exists() {
-            println!(
-                "'{}' not found in folder '{}', so skipping...",
-                args.filename, folder
-            );
+            if args.verbose {
+                println!(
+                    "'{}' not found in folder '{}', so skipping...",
+                    args.filename, folder
+                );
+            }
             continue;
         }
         let file = File::open(path)?;
@@ -50,7 +55,10 @@ fn main() -> io::Result<()> {
         for line in reader.lines().filter_map(|result| result.ok()) {
             writeln!(out, "{},{}", folder, line)?;
         }
-        println!("{} written to {} successfully!", folder, args.output);
+
+        if args.verbose {
+            println!("{} written to {} successfully!", folder, args.output);
+        }
     }
 
     Ok(())
