@@ -1,6 +1,6 @@
 use clap::{ArgEnum, Parser};
 use std::fs::File;
-use std::io::{self, prelude::*, BufReader, BufWriter, ErrorKind};
+use std::io::{prelude::*, BufReader, BufWriter, ErrorKind};
 use std::path::Path;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
@@ -34,9 +34,10 @@ struct Args {
     error: ErrorMode,
 }
 
-fn main() -> io::Result<()> {
+fn main() {
     let args = Args::parse();
 
+    // Create output file that all inputs will be aggregated into
     let out = match File::create(args.output.clone()) {
         Ok(file) => file,
         Err(err) => match err.kind() {
@@ -52,6 +53,7 @@ fn main() -> io::Result<()> {
 
     let mut out = BufWriter::new(out);
 
+    // Expect folder names to be comma-delimited
     for (i, folder) in args.folders.split(',').enumerate() {
         let path = Path::new(&args.root).join(folder).join(&args.filename);
 
@@ -59,6 +61,7 @@ fn main() -> io::Result<()> {
             Ok(file) => file,
             Err(err) => match err.kind() {
                 ErrorKind::NotFound => {
+                    // Skip files that don't exist if `--error=skip`
                     if args.error == ErrorMode::Skip {
                         if args.verbose {
                             println!("Couldn't find file in folder '{}', so skipping...", folder);
@@ -80,6 +83,7 @@ fn main() -> io::Result<()> {
         };
         let mut reader = BufReader::new(file);
 
+        // Read the header, but only write if on first iteration (to avoid dupes)
         let mut header = String::new();
         reader.read_line(&mut header).expect(format!(
             "Failed to read header from file in folder '{}'!",
@@ -101,6 +105,4 @@ fn main() -> io::Result<()> {
             println!("{} written to {} successfully!", folder, args.output);
         }
     }
-
-    Ok(())
 }
