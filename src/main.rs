@@ -1,7 +1,13 @@
-use clap::Parser;
+use clap::{ArgEnum, Parser};
 use std::fs::File;
-use std::io::{self, prelude::*, BufReader, BufWriter};
+use std::io::{self, prelude::*, BufReader, BufWriter, ErrorKind};
 use std::path::Path;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
+enum ErrorMode {
+    Panic,
+    Skip,
+}
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -23,37 +29,72 @@ struct Args {
 
     #[clap(short, long)]
     verbose: bool,
+
+    #[clap(short, long, arg_enum, default_value = "panic")]
+    error: ErrorMode,
 }
 
 fn main() -> io::Result<()> {
     let args = Args::parse();
 
-    let out = File::create(args.output.clone())?;
+    let out = match File::create(args.output.clone()) {
+        Ok(file) => file,
+        Err(err) => match err.kind() {
+            ErrorKind::PermissionDenied => {
+                panic!("Permission denied when trying to create output file!")
+            }
+            other => panic!(
+                "Encountered an error when creating output file: {:?}",
+                other
+            ),
+        },
+    };
+
     let mut out = BufWriter::new(out);
 
     for (i, folder) in args.folders.split(',').enumerate() {
         let path = Path::new(&args.root).join(folder).join(&args.filename);
 
-        if !path.exists() {
-            if args.verbose {
-                println!(
-                    "'{}' not found in folder '{}', so skipping...",
-                    args.filename, folder
-                );
-            }
-            continue;
-        }
-        let file = File::open(path)?;
+        let file = match File::open(path) {
+            Ok(file) => file,
+            Err(err) => match err.kind() {
+                ErrorKind::NotFound => {
+                    if args.error == ErrorMode::Skip {
+                        if args.verbose {
+                            println!("Couldn't find file in folder '{}', so skipping...", folder);
+                        }
+                        continue;
+                    } else {
+                        panic!("Couldn't find file in folder '{}'!", folder)
+                    }
+                }
+                ErrorKind::PermissionDenied => panic!(
+                    "Permission denied when trying to read file in folder '{}'!",
+                    folder
+                ),
+                other => panic!(
+                    "Encountered an error when reading file in folder '{}': {:?}",
+                    folder, other
+                ),
+            },
+        };
         let mut reader = BufReader::new(file);
 
         let mut header = String::new();
-        reader.read_line(&mut header)?;
+        reader.read_line(&mut header).expect(format!(
+            "Failed to read header from file in folder '{}'!",
+            folder
+        ));
         if i == 0 {
-            out.write_all(format!("{},{}", args.column, header).as_bytes())?;
+            out.write_all(format!("{},{}", args.column, header).as_bytes())
+                .expect("Failed to write header to output file!");
         }
 
         for line in reader.lines().filter_map(|result| result.ok()) {
-            writeln!(out, "{},{}", folder, line)?;
+            writeln!(out, "{},{}", folder, line).expect(format!(
+                "Failed to write rows from folder '{}' to output file!",
+                folder
+            ));
         }
 
         if args.verbose {
