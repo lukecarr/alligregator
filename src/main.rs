@@ -52,6 +52,7 @@ fn main() {
     };
 
     let mut out = BufWriter::new(out);
+    let mut lines = Vec::new();
 
     // Expect folder names to be comma-delimited
     for (i, folder) in args.folders.split(',').enumerate() {
@@ -83,26 +84,28 @@ fn main() {
         };
         let mut reader = BufReader::new(file);
 
-        // Read the header, but only write if on first iteration (to avoid dupes)
+        // Read the header, but only include if on first iteration (to avoid dupes)
         let mut header = String::new();
-        reader.read_line(&mut header).expect(format!(
-            "Failed to read header from file in folder '{}'!",
-            folder
-        ));
+        reader
+            .read_line(&mut header)
+            .unwrap_or_else(|_| panic!("Failed to read header from file in folder '{}'!", folder));
         if i == 0 {
-            out.write_all(format!("{},{}", args.column, header).as_bytes())
-                .expect("Failed to write header to output file!");
+            lines.extend_from_slice(
+                vec![
+                    args.column.clone(),
+                    ",".to_owned(),
+                    header.replace("\r\n", ""),
+                    "\n".to_owned(),
+                ]
+                .as_slice(),
+            );
         }
 
         for line in reader.lines().filter_map(|result| result.ok()) {
-            writeln!(out, "{},{}", folder, line).expect(format!(
-                "Failed to write rows from folder '{}' to output file!",
-                folder
-            ));
-        }
-
-        if args.verbose {
-            println!("{} written to {} successfully!", folder, args.output);
+            lines.extend_from_slice(vec![folder.to_owned(), line, "\n".to_owned()].as_slice());
         }
     }
+
+    out.write_all(lines.join("").as_bytes())
+        .expect("Failed to write to output file!");
 }
