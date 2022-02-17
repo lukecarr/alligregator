@@ -1,7 +1,7 @@
 use clap::{ArgEnum, Parser};
 use std::fs::File;
 use std::io::{prelude::*, BufReader, BufWriter, ErrorKind};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
 enum ErrorMode {
@@ -34,11 +34,8 @@ struct Args {
     error: ErrorMode,
 }
 
-fn main() {
-    let args = Args::parse();
-
-    // Create output file that all inputs will be aggregated into
-    let out = match File::create(args.output.clone()) {
+fn create_output(path: String) -> BufWriter<File> {
+    let file = match File::create(path) {
         Ok(file) => file,
         Err(err) => match err.kind() {
             ErrorKind::PermissionDenied => {
@@ -50,59 +47,82 @@ fn main() {
             ),
         },
     };
+    BufWriter::new(file)
+}
 
-    let mut out = BufWriter::new(out);
+fn open_input(path: &PathBuf) -> Option<BufReader<File>> {
+    let folder = path.parent().unwrap().as_os_str().to_string_lossy();
+    let file = match File::open(path) {
+        Ok(file) => Some(file),
+        Err(err) => match err.kind() {
+            ErrorKind::NotFound => None,
+            ErrorKind::PermissionDenied => panic!(
+                "Permission denied when trying to read file in folder '{}'!",
+                folder
+            ),
+            other => panic!(
+                "Encountered an error when reading file in folder '{}': {:?}",
+                folder, other
+            ),
+        },
+    };
+    match file {
+        Some(file) => Some(BufReader::new(file)),
+        None => None,
+    }
+}
+
+fn main() {
+    let args = Args::parse();
+    let mut out = create_output(args.output);
     let mut lines = Vec::new();
+    let mut found_header = false;
 
     // Expect folder names to be comma-delimited
-    for (i, folder) in args.folders.split(',').enumerate() {
+    for folder in args.folders.split(',') {
         let path = Path::new(&args.root).join(folder).join(&args.filename);
-
-        let file = match File::open(path) {
-            Ok(file) => file,
-            Err(err) => match err.kind() {
-                ErrorKind::NotFound => {
-                    // Skip files that don't exist if `--error=skip`
-                    if args.error == ErrorMode::Skip {
-                        if args.verbose {
-                            println!("Couldn't find file in folder '{}', so skipping...", folder);
-                        }
-                        continue;
-                    } else {
-                        panic!("Couldn't find file in folder '{}'!", folder)
+        let mut reader = match open_input(&path) {
+            Some(reader) => reader,
+            None => {
+                // Skip files that don't exist if `--error=skip`
+                if args.error == ErrorMode::Skip {
+                    if args.verbose {
+                        println!("Couldn't find file in folder '{}', so skipping...", folder);
                     }
+                    continue;
+                } else {
+                    panic!("Couldn't find file in folder '{}'!", folder)
                 }
-                ErrorKind::PermissionDenied => panic!(
-                    "Permission denied when trying to read file in folder '{}'!",
-                    folder
-                ),
-                other => panic!(
-                    "Encountered an error when reading file in folder '{}': {:?}",
-                    folder, other
-                ),
-            },
+            }
         };
-        let mut reader = BufReader::new(file);
 
         // Read the header, but only include if on first iteration (to avoid dupes)
         let mut header = String::new();
         reader
             .read_line(&mut header)
             .unwrap_or_else(|_| panic!("Failed to read header from file in folder '{}'!", folder));
-        if i == 0 {
+        if !found_header {
             lines.extend_from_slice(
                 vec![
                     args.column.clone(),
                     ",".to_owned(),
-                    header.replace("\r\n", ""),
-                    "\n".to_owned(),
+                    header.replace("\r\n", "\n"),
                 ]
                 .as_slice(),
             );
+            found_header = true;
         }
 
         for line in reader.lines().filter_map(|result| result.ok()) {
-            lines.extend_from_slice(vec![folder.to_owned(), line, "\n".to_owned()].as_slice());
+            lines.extend_from_slice(
+                vec![
+                    folder.to_owned(),
+                    String::from(","),
+                    line,
+                    String::from("\n"),
+                ]
+                .as_slice(),
+            );
         }
     }
 
