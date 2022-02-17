@@ -1,7 +1,7 @@
 use clap::{ArgEnum, Parser};
 use std::fs::File;
 use std::io::{prelude::*, BufReader, BufWriter, ErrorKind};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
 enum ErrorMode {
@@ -50,7 +50,7 @@ fn create_output(path: String) -> BufWriter<File> {
     BufWriter::new(file)
 }
 
-fn open_input(path: &PathBuf) -> Option<BufReader<File>> {
+fn open_input(path: &Path) -> Option<BufReader<File>> {
     let folder = path.parent().unwrap().as_os_str().to_string_lossy();
     let file = match File::open(path) {
         Ok(file) => Some(file),
@@ -66,10 +66,7 @@ fn open_input(path: &PathBuf) -> Option<BufReader<File>> {
             ),
         },
     };
-    match file {
-        Some(file) => Some(BufReader::new(file)),
-        None => None,
-    }
+    file.map(BufReader::new)
 }
 
 fn main() {
